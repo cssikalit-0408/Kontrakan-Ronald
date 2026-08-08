@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#15395b">
+<meta name="robots" content="noindex, nofollow">
+<title>Kartu Kamar</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🔑</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="tanpa-nav">
+
+<div id="halaman"></div>
+
+<!--
+  Halaman ini hanya membaca data dari bagian setelah tanda # pada alamat.
+  Isi setelah # tidak pernah dikirim ke server. Halaman ini tidak menyimpan,
+  mengirim, atau mengubah apa pun. Tidak ada data penghuni lain di sini.
+-->
+<script>
+(function () {
+  'use strict';
+
+  var NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+  var NAMA_BULAN_PENDEK = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+    'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+  var INFO_STATUS = {
+    lancar: { ikon: '🟢', label: 'Lancar' },
+    telat:  { ikon: '🟡', label: 'Telat' },
+    baru:   { ikon: '🟠', label: 'Baru menunggak' },
+    lama:   { ikon: '🔴', label: 'Lama menunggak' }
+  };
+
+  function esc(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function rupiah(n) {
+    var neg = n < 0;
+    var s = String(Math.abs(Math.round(Number(n) || 0)));
+    var out = '', c = 0;
+    for (var i = s.length - 1; i >= 0; i--) {
+      out = s.charAt(i) + out;
+      c++;
+      if (c % 3 === 0 && i > 0) out = '.' + out;
+    }
+    return (neg ? '-' : '') + 'Rp ' + out;
+  }
+
+  function parseTgl(s) {
+    var b = String(s).split('-');
+    return new Date(Number(b[0]), Number(b[1]) - 1, Number(b[2]));
+  }
+
+  function labelTgl(d) {
+    return d.getDate() + ' ' + NAMA_BULAN_PENDEK[d.getMonth()] + ' ' + d.getFullYear();
+  }
+
+  function labelTglPanjang(d) {
+    return d.getDate() + ' ' + NAMA_BULAN[d.getMonth()] + ' ' + d.getFullYear();
+  }
+
+  function labelBulan(kode) {
+    var b = String(kode).split('-');
+    return NAMA_BULAN[Number(b[1]) - 1] + ' ' + b[0];
+  }
+
+  /* Jatuh tempo: tanggal ulang bulan, mundur ke hari terakhir bulan pendek. */
+  function jatuhTempo(kodeBulan, tglUlang) {
+    var b = String(kodeBulan).split('-');
+    var y = Number(b[0]), m = Number(b[1]) - 1;
+    var maks = new Date(y, m + 1, 0).getDate();
+    return new Date(y, m, Math.min(Math.max(1, tglUlang), maks));
+  }
+
+  function tambahHari(d, n) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  }
+
+  function dariB64Url(kode) {
+    var b64 = String(kode).replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4 !== 0) b64 += '=';
+    return decodeURIComponent(escape(atob(b64)));
+  }
+
+  function tampilkanPesanRamah() {
+    document.getElementById('halaman').innerHTML =
+      '<div class="bungkus"><div class="pesan-ramah">' +
+      '<div class="ikon-besar">🔑</div>' +
+      '<h2>Tautan tidak valid</h2>' +
+      '<p>Silakan minta tautan baru ke pemilik kos.</p>' +
+      '</div></div>';
+    document.title = 'Kartu Kamar';
+  }
+
+  function ambilKode() {
+    var h = String(window.location.hash || '');
+    if (h.charAt(0) === '#') h = h.slice(1);
+    if (h.indexOf('d=') !== 0) return '';
+    return h.slice(2);
+  }
+
+  function sah(s) {
+    return s && typeof s === 'object' &&
+      typeof s.n === 'string' && s.n.length > 0 &&
+      typeof s.t === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.t) &&
+      INFO_STATUS[s.st] && Array.isArray(s.r);
+  }
+
+  function gambar(s) {
+    var info = INFO_STATUS[s.st];
+    var tglPotret = parseTgl(s.t);
+    var tenggat = Number(s.g) || 10;
+
+    document.title = 'Kartu Kamar ' + s.k + ' — ' + s.n;
+
+    var html = '';
+
+    /* ---- Kepala ---- */
+    html += '<header class="kartu-atas"><div class="bungkus">' +
+      '<p class="nama-besar">' + esc(s.n) + '</p>' +
+      '<p class="kamar-kecil">Kamar ' + esc(s.k) + ' · ' + esc(s.o || 'Rumah Opung') + '</p>' +
+      '<div><span class="status-besar sb-' + esc(s.st) + '">' + info.ikon + ' ' + info.label + '</span></div>' +
+      '</div></header>';
+
+    html += '<main class="bungkus">';
+
+    /* ---- Catatan wajib: kartu adalah potret ---- */
+    html += '<div class="catatan-potret">Data per ' + esc(labelTglPanjang(tglPotret)) +
+      '. Untuk data terbaru, minta tautan baru ke pemilik.</div>';
+
+    /* ---- Total tagihan ---- */
+    html += '<div class="kartu"><div class="kartu-isi">' +
+      '<div class="sunyi">Total yang perlu dibayar</div>' +
+      '<div class="total-besar">' + rupiah(s.tt) + '</div>';
+
+    if (s.st === 'lancar' && s.fd) {
+      html += '<p class="petunjuk">⚠️ Pokok sewa sudah lunas, tetapi masih ada denda keterlambatan yang belum dibayar.</p>';
+    } else if (s.st === 'lancar' && Number(s.tt) === 0) {
+      html += '<p class="petunjuk">Terima kasih, pembayaran tercatat lancar.</p>';
+    }
+
+    html += '<div class="ringkas">' +
+      '<div class="ringkas-baris"><span>Sisa pokok sewa</span><span class="tebal">' + rupiah(s.sp) + '</span></div>' +
+      '<div class="ringkas-baris"><span>Denda keterlambatan</span><span class="tebal">' + rupiah(s.sd) + '</span></div>';
+    if (Number(s.sl) > 0) {
+      html += '<div class="ringkas-baris"><span>Saldo lebih</span><span class="tebal">−' + rupiah(s.sl) + '</span></div>';
+    }
+    html += '<div class="ringkas-baris total"><span>Total</span><span>' + rupiah(s.tt) + '</span></div>' +
+      '</div></div></div>';
+
+    /* ---- Keterangan bulanan ---- */
+    html += '<div class="kartu"><div class="kartu-isi">' +
+      '<div class="ringkas">' +
+      '<div class="ringkas-baris"><span>Tanggal jatuh tempo</span><span class="tebal">tiap tanggal ' + esc(s.u) + '</span></div>' +
+      '<div class="ringkas-baris"><span>Batas bayar</span><span class="tebal">' + tenggat + ' hari setelahnya</span></div>' +
+      '<div class="ringkas-baris"><span>Bulan tertunggak</span><span class="tebal">' + esc(s.m) + ' bulan</span></div>' +
+      '</div>' +
+      '<p class="petunjuk">Kalau tanggal jatuh tempo melebihi jumlah hari pada bulan itu, jatuh temponya mundur ke hari terakhir bulan tersebut.</p>' +
+      '</div></div>';
+
+    /* ---- Posisi awal (F8), bila ada ---- */
+    if (s.aw && Number(s.aw[1]) > 0) {
+      html += '<div class="riwayat-baris awal">' +
+        '<div class="riwayat-kepala"><span>Posisi awal</span></div>' +
+        '<div class="riwayat-info">Tertunggak ' + esc(s.aw[0]) + ' bulan' +
+        (s.aw[2] ? ' sejak ' + esc(labelBulan(s.aw[2])) : '') +
+        ' · sisa <b>' + rupiah(s.aw[1]) + '</b>.</div>' +
+        '</div>';
+    }
+
+    /* ---- Riwayat 12 bulan (bisa dibuka-tutup) ---- */
+    var baris = '';
+    for (var i = s.r.length - 1; i >= 0; i--) {
+      var q = s.r[i];
+      var bulan = q[0], pokok = Number(q[1]), sisaPokok = Number(q[2]),
+        sisaDenda = Number(q[3]), dibayar = Number(q[4]), dibebaskan = Number(q[5]) === 1;
+      var jt = jatuhTempo(bulan, Number(s.u));
+      var bb = tambahHari(jt, tenggat);
+      var belumJT = sisaPokok < 0;
+
+      var tag, tagKelas, kelas;
+      if (belumJT) { tag = 'belum jatuh tempo'; tagKelas = 'tag-jalan'; kelas = ''; }
+      else if (sisaPokok === 0 && sisaDenda === 0) { tag = 'lunas'; tagKelas = 'tag-lunas'; kelas = ' lunas'; }
+      else if (sisaPokok === 0) { tag = 'pokok lunas'; tagKelas = 'tag-lunas'; kelas = ' lunas'; }
+      else { tag = 'belum lunas'; tagKelas = 'tag-belum'; kelas = ' belum'; }
+
+      baris += '<div class="riwayat-baris' + kelas + '">' +
+        '<div class="riwayat-kepala"><span>' + esc(labelBulan(bulan)) + '</span>' +
+        '<span class="riwayat-tag ' + tagKelas + '">' + tag + '</span></div>' +
+        '<div class="riwayat-info">Jatuh tempo <b>' + esc(labelTgl(jt)) +
+        '</b> · Batas bayar <b>' + esc(labelTgl(bb)) + '</b></div>' +
+        '<div class="riwayat-info">Sewa <b>' + rupiah(pokok) + '</b> · Dibayar <b>' + rupiah(dibayar) +
+        '</b> · Sisa <b>' + (belumJT ? '—' : rupiah(sisaPokok)) + '</b></div>' +
+        (sisaDenda > 0 ? '<div class="riwayat-info">Denda belum dibayar <b>' + rupiah(sisaDenda) + '</b></div>' : '') +
+        (dibebaskan ? '<div class="riwayat-info">Denda bulan ini <b>dibebaskan pemilik</b>.</div>' : '') +
+        '</div>';
+    }
+
+    html += '<details class="lipat"><summary>Riwayat ' + s.r.length + ' bulan terakhir</summary>' +
+      '<div>' + (baris || '<p class="sunyi">Belum ada riwayat.</p>') + '</div></details>';
+
+    /* ---- Penutup ---- */
+    html += '<p class="petunjuk" style="margin:18px 0 24px">Kartu ini hanya untuk dilihat. ' +
+      'Kalau sudah membayar, kirim bukti transfernya lewat WhatsApp ke pemilik seperti biasa ya. ' +
+      'Kalau ada angka yang dirasa keliru, sampaikan juga lewat WhatsApp.</p>';
+
+    html += '</main>';
+
+    document.getElementById('halaman').innerHTML = html;
+  }
+
+  function jalan() {
+    var kode = ambilKode();
+    if (!kode) { tampilkanPesanRamah(); return; }
+    var s;
+    try {
+      s = JSON.parse(dariB64Url(kode));
+    } catch (e) {
+      tampilkanPesanRamah();
+      return;
+    }
+    if (!sah(s)) { tampilkanPesanRamah(); return; }
+    try {
+      gambar(s);
+    } catch (e) {
+      tampilkanPesanRamah();
+    }
+  }
+
+  jalan();
+  window.addEventListener('hashchange', jalan);
+})();
+</script>
+</body>
+</html>
