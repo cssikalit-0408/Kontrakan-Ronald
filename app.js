@@ -700,4 +700,894 @@ var RO = (function () {
   };
 })();
 
+/* ============================================================
+   BAGIAN H — TAMPILAN PAPAN KENDALI (layar pemilik)
+   Hanya berjalan di peramban. Di Node bagian ini dilewati.
+   ============================================================ */
+(function () {
+  if (typeof document === 'undefined') return;
+
+  var db = null;
+  var kini = null;          /* tanggal hari ini, dihitung ulang tiap gambar ulang */
+  var tab = 'beranda';
+  var saring = null;        /* null | 'verifikasi' | 'tagih' */
+  var idxToast = null;
+
+  /* ---------------- pembantu kecil ---------------- */
+
+  function el(id) { return document.getElementById(id); }
+
+  function esc(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function titik(n) { return RO.rupiah(n).replace('Rp ', ''); }
+
+  function toast(pesan) {
+    var t = el('toast');
+    t.textContent = pesan;
+    t.hidden = false;
+    if (idxToast) clearTimeout(idxToast);
+    idxToast = setTimeout(function () { t.hidden = true; }, 2600);
+  }
+
+  function simpanDanGambar() {
+    if (!RO.simpan(db)) {
+      toast('Gagal menyimpan. Ruang penyimpanan peramban mungkin penuh.');
+    }
+    gambar();
+  }
+
+  function cariPenghuni(id) {
+    for (var i = 0; i < db.penghuni.length; i++) if (db.penghuni[i].id === id) return db.penghuni[i];
+    return null;
+  }
+
+  function cariPembayaran(id) {
+    for (var i = 0; i < db.pembayaran.length; i++) if (db.pembayaran[i].id === id) return db.pembayaran[i];
+    return null;
+  }
+
+  function idBaru(awalan, daftar) {
+    var n = 1;
+    while (true) {
+      var kandidat = awalan + n;
+      var bentrok = false;
+      for (var i = 0; i < daftar.length; i++) if (daftar[i].id === kandidat) bentrok = true;
+      if (!bentrok) return kandidat;
+      n++;
+    }
+  }
+
+  /* ---------------- lapisan (dialog) ---------------- */
+
+  function bukaLapis(judul, isi) {
+    el('lapisJudul').textContent = judul;
+    el('lapisIsi').innerHTML = isi;
+    el('lapisIsi').scrollTop = 0;
+    el('lapis').hidden = false;
+    document.body.style.overflow = 'hidden';
+  }
+
+  function tutupLapis() {
+    el('lapis').hidden = true;
+    el('lapisIsi').innerHTML = '';
+    document.body.style.overflow = '';
+  }
+
+  function lapisTerbuka() { return !el('lapis').hidden; }
+
+  /* ---------------- salin teks ---------------- */
+
+  function salin(teks) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(teks).then(function () {
+        toast('Tersalin.');
+      }, function () { salinCadangan(teks); });
+    } else {
+      salinCadangan(teks);
+    }
+  }
+
+  function salinCadangan(teks) {
+    var ta = document.createElement('textarea');
+    ta.value = teks;
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    toast(ok ? 'Tersalin.' : 'Tidak bisa menyalin otomatis. Silakan tahan lalu salin manual.');
+  }
+
+  /* ==========================================================
+     GAMBAR — Beranda
+     ========================================================== */
+
+  function lencanaStatus(h) {
+    var s = RO.INFO_STATUS[h.status];
+    var html = '<span class="lencana l-' + h.status + '">' + s.ikon + ' ' + s.label + '</span>';
+    if (h.penandaDenda) {
+      html += ' <span class="lencana l-telat">⚠️ ada denda belum lunas</span>';
+    }
+    return html;
+  }
+
+  /* Keterangan singkat di baris kamar, disesuaikan dengan statusnya supaya
+     tidak membingungkan (mis. "tidak ada tunggakan" di sebelah tagihan besar). */
+  function ringkasanBaris(h) {
+    if (h.bulanTertunggak > 0) return 'Tertunggak ' + h.bulanTertunggak + ' bulan';
+    if (h.status === 'telat' && h.periodeTerlambat) {
+      return 'Telat ' + h.periodeTerlambat.hariSejakJatuhTempo + ' hari sejak jatuh tempo';
+    }
+    if (h.penandaDenda) return 'Sewa lunas, denda belum';
+    if (h.saldoLebih > 0) return 'Lebih bayar ' + RO.rupiah(h.saldoLebih);
+    return 'Tidak ada tunggakan';
+  }
+
+  function gambarBeranda() {
+    var semua = RO.hitungSemua(db, kini);
+    var menunggu = db.pembayaran.filter(function (b) { return b.status === 'menunggu'; });
+    var perluTagih = semua.filter(function (h) { return h.status !== 'lancar'; });
+
+    /* --- Panel Hari Ini: hanya dua angka --- */
+    var panel;
+    if (menunggu.length === 0 && perluTagih.length === 0) {
+      panel = '<div class="panel-kosong">Tidak ada yang perlu dikerjakan hari ini.</div>';
+      saring = null;
+    } else {
+      panel =
+        '<div class="panel">' +
+        '<button type="button" class="panel-ubin" data-aksi="saring" data-nilai="verifikasi"' +
+        ' aria-pressed="' + (saring === 'verifikasi') + '">' +
+        '<span class="panel-angka">' + menunggu.length + '</span>' +
+        '<span class="panel-label">🔔 Menunggu verifikasi</span></button>' +
+        '<button type="button" class="panel-ubin" data-aksi="saring" data-nilai="tagih"' +
+        ' aria-pressed="' + (saring === 'tagih') + '">' +
+        '<span class="panel-angka">' + perluTagih.length + '</span>' +
+        '<span class="panel-label">📣 Perlu ditagih</span></button>' +
+        '</div>';
+    }
+    el('panelHariIni').innerHTML = panel;
+
+    /* --- Daftar di bawah panel --- */
+    var isi = '';
+    if (saring === 'verifikasi') {
+      isi += '<h2 class="judul-bagian">Menunggu verifikasi (' + menunggu.length + ')</h2>';
+      if (!menunggu.length) {
+        isi += '<div class="kartu"><div class="kartu-isi sunyi">Tidak ada laporan pembayaran yang menunggu.</div></div>';
+      }
+      menunggu.slice().sort(function (a, b) {
+        return a.tanggalBayar < b.tanggalBayar ? -1 : 1;
+      }).forEach(function (b) {
+        var p = cariPenghuni(b.penghuniId);
+        isi += '<button type="button" class="antre" data-aksi="verifikasi" data-id="' + esc(b.id) + '">' +
+          '<div class="baris-judul"><span class="baris-kamar-no">Kamar ' + esc(p ? p.kamar : '?') + '</span>' +
+          '<span class="baris-nama">' + esc(p ? p.nama : 'Penghuni terhapus') + '</span></div>' +
+          '<div class="antre-jumlah">' + RO.rupiah(b.jumlah) + '</div>' +
+          '<div class="riwayat-info">Dilaporkan ' + esc(RO.labelTgl(RO.parseTgl(b.tanggalBayar))) +
+          (b.catatanBukti ? ' · ' + esc(b.catatanBukti) : '') + '</div>' +
+          '</button>';
+      });
+    } else {
+      var daftar = saring === 'tagih' ? perluTagih : semua;
+      isi += '<h2 class="judul-bagian">' +
+        (saring === 'tagih' ? 'Perlu ditagih (' + perluTagih.length + ')' : 'Daftar kamar (' + semua.length + ')') +
+        '</h2>';
+      if (!daftar.length) {
+        isi += '<div class="kartu"><div class="kartu-isi sunyi">' +
+          (db.penghuni.length ? 'Semua penghuni lancar.' : 'Belum ada penghuni. Tambahkan lewat Pengaturan.') +
+          '</div></div>';
+      }
+      daftar.forEach(function (h) {
+        var p = h.penghuni;
+        isi += '<div class="baris-kamar s-' + h.status + '">' +
+          '<button type="button" class="baris-utama" data-aksi="detail" data-id="' + esc(p.id) + '">' +
+          '<div class="baris-judul"><span class="baris-kamar-no">Kamar ' + esc(p.kamar) + '</span>' +
+          '<span class="baris-nama">' + esc(p.nama) + '</span></div>' +
+          '<div>' + lencanaStatus(h) + '</div>' +
+          '<div class="baris-rincian">' +
+          '<span class="baris-tunggak">' + esc(ringkasanBaris(h)) + '</span>' +
+          '<span class="baris-total' + (h.totalTagihan === 0 ? ' nol' : '') + '">' + RO.rupiah(h.totalTagihan) + '</span>' +
+          '</div></button>' +
+          '<div class="baris-aksi">' +
+          '<button type="button" data-aksi="tagih" data-id="' + esc(p.id) + '">📣 Tagih</button>' +
+          '<button type="button" data-aksi="kartu" data-id="' + esc(p.id) + '">🔗 Buat Kartu</button>' +
+          '</div></div>';
+      });
+    }
+    el('daftarKamar').innerHTML = isi;
+  }
+
+  /* ==========================================================
+     GAMBAR — Detail penghuni (riwayat 12 bulan)
+     ========================================================== */
+
+  function htmlDetail(h) {
+    var p = h.penghuni;
+    var isi = '<div class="kartu"><div class="kartu-isi">' +
+      '<div class="baris-judul"><span class="baris-kamar-no">Kamar ' + esc(p.kamar) + '</span>' +
+      '<span class="baris-nama">' + esc(p.nama) + '</span></div>' +
+      '<div style="margin-top:6px">' + lencanaStatus(h) + '</div>' +
+      '<div class="ringkas">' +
+      '<div class="ringkas-baris"><span>Sewa per bulan</span><span class="tebal">' + RO.rupiah(p.sewa) + '</span></div>' +
+      '<div class="ringkas-baris"><span>Tanggal ulang bulan</span><span class="tebal">tiap tanggal ' + esc(p.tglUlangBulan) + '</span></div>' +
+      '<div class="ringkas-baris"><span>Sisa pokok</span><span class="tebal">' + RO.rupiah(h.totalSisaPokok) + '</span></div>' +
+      '<div class="ringkas-baris"><span>Denda belum dibayar</span><span class="tebal">' + RO.rupiah(h.totalSisaDenda) + '</span></div>';
+    if (h.totalDendaDibebaskan > 0) {
+      isi += '<div class="ringkas-baris"><span>Denda dibebaskan</span><span class="tebal">−' + RO.rupiah(h.totalDendaDibebaskan) + '</span></div>';
+    }
+    if (h.saldoLebih > 0) {
+      isi += '<div class="ringkas-baris"><span>Saldo lebih</span><span class="tebal">−' + RO.rupiah(h.saldoLebih) + '</span></div>';
+    }
+    isi += '<div class="ringkas-baris total"><span>Total tagihan</span><span>' + RO.rupiah(h.totalTagihan) + '</span></div>' +
+      '</div></div>' +
+      '<div class="baris-aksi">' +
+      '<button type="button" data-aksi="tagih" data-id="' + esc(p.id) + '">📣 Tagih</button>' +
+      '<button type="button" data-aksi="kartu" data-id="' + esc(p.id) + '">🔗 Buat Kartu</button>' +
+      '</div></div>';
+
+    isi += '<h2 class="judul-bagian">Riwayat</h2>';
+
+    /* F8 — satu baris posisi awal di puncak, tanpa mengisi mundur 12 bulan */
+    if (h.saldoAwal && h.saldoAwal.pokokTertunggak > 0) {
+      var a = h.saldoAwal;
+      isi += '<div class="riwayat-baris awal">' +
+        '<div class="riwayat-kepala"><span>Posisi awal</span>' +
+        '<span class="riwayat-tag ' + (a.sisaPokok > 0 ? 'tag-belum' : 'tag-lunas') + '">' +
+        (a.sisaPokok > 0 ? 'belum lunas' : 'lunas') + '</span></div>' +
+        '<div class="riwayat-info">Per ' + esc(RO.labelTgl(RO.parseTgl(db.pengaturan.tanggalPotong))) +
+        ' — tertunggak ' + esc(a.bulanTertunggak) + ' bulan, ' + RO.rupiah(a.pokokTertunggak) +
+        (a.sejakBulan ? ' (sejak ' + esc(RO.labelBulan(a.sejakBulan)) + ')' : '') + '.</div>' +
+        '<div class="riwayat-info">Dibayar <b>' + RO.rupiah(a.dibayar) + '</b> · Sisa <b>' + RO.rupiah(a.sisaPokok) + '</b> · Denda masa lalu dihapus seluruhnya.</div>' +
+        '</div>';
+    }
+
+    return isi;
+  }
+
+  function riwayatHtml(h) {
+    var p = h.penghuni;
+    var out = '';
+    h.periode.slice(-12).forEach(function (q) {
+      var kelas, tag, tagKelas;
+      if (!q.sudahJatuhTempo) { kelas = ''; tag = 'belum jatuh tempo'; tagKelas = 'tag-jalan'; }
+      else if (q.sisaPokok === 0 && q.sisaDenda === 0) { kelas = ' lunas'; tag = 'lunas'; tagKelas = 'tag-lunas'; }
+      else if (q.sisaPokok === 0) { kelas = ' lunas'; tag = 'pokok lunas'; tagKelas = 'tag-lunas'; }
+      else { kelas = ' belum'; tag = 'belum lunas'; tagKelas = 'tag-belum'; }
+
+      out += '<div class="riwayat-baris' + kelas + '">' +
+        '<div class="riwayat-kepala"><span>' + esc(RO.labelBulan(q.bulan)) + '</span>' +
+        '<span class="riwayat-tag ' + tagKelas + '">' + tag + '</span></div>' +
+        '<div class="riwayat-info">Jatuh tempo <b>' + esc(RO.labelTgl(q.jatuhTempo)) +
+        '</b> · Batas bayar <b>' + esc(RO.labelTgl(q.batasBayar)) + '</b></div>' +
+        '<div class="riwayat-info">Pokok <b>' + RO.rupiah(q.pokok) + '</b> · Dibayar <b>' + RO.rupiah(q.dibayarPokok) +
+        '</b> · Sisa <b>' + (q.sudahJatuhTempo ? RO.rupiah(q.sisaPokok) : '—') + '</b></div>';
+
+      if (q.sudahJatuhTempo && q.sisaPokok > 0 && q.lewatBatas) {
+        out += '<div class="riwayat-info">Terlambat <b>' + q.hariSejakJatuhTempo + ' hari</b> sejak jatuh tempo ' +
+          '(' + q.hariLewatBatas + ' hari lewat batas bayar).</div>';
+      }
+
+      if (q.dendaTimbul > 0) {
+        out += '<div class="riwayat-denda"><span>Denda ' +
+          '<b class="' + (q.dibebaskan ? 'dibebaskan' : '') + '">' + RO.rupiah(q.dendaTimbul) + '</b>' +
+          (q.dibebaskan ? ' <span class="riwayat-tag tag-lunas">dibebaskan</span>'
+            : (q.sisaDenda === 0 ? ' <span class="riwayat-tag tag-lunas">sudah dibayar</span>' : '')) +
+          '</span>' +
+          '<button type="button" data-aksi="waive" data-id="' + esc(p.id) + '" data-bulan="' + esc(q.bulan) + '">' +
+          (q.dibebaskan ? 'Aktifkan lagi' : 'Bebaskan') + '</button></div>';
+      }
+      out += '</div>';
+    });
+    return out;
+  }
+
+  function bukaDetail(id) {
+    var p = cariPenghuni(id);
+    if (!p) return;
+    var h = RO.hitung(db, p, kini);
+    var bayarPenghuni = db.pembayaran.filter(function (b) { return b.penghuniId === id; })
+      .slice().sort(function (a, b) { return a.tanggalBayar < b.tanggalBayar ? 1 : -1; });
+
+    var isi = htmlDetail(h) + riwayatHtml(h);
+
+    isi += '<h2 class="judul-bagian">Catatan pembayaran</h2>';
+    if (!bayarPenghuni.length) {
+      isi += '<div class="kartu"><div class="kartu-isi sunyi">Belum ada catatan pembayaran.</div></div>';
+    }
+    bayarPenghuni.forEach(function (b) {
+      var tagKelas = b.status === 'disetujui' ? 'tag-lunas' : (b.status === 'menunggu' ? 'tag-jalan' : 'tag-belum');
+      isi += '<div class="riwayat-baris">' +
+        '<div class="riwayat-kepala"><span>' + RO.rupiah(b.jumlah) + '</span>' +
+        '<span class="riwayat-tag ' + tagKelas + '">' + esc(b.status) + '</span></div>' +
+        '<div class="riwayat-info">' + esc(RO.labelTgl(RO.parseTgl(b.tanggalBayar))) +
+        (b.catatanBukti ? ' · ' + esc(b.catatanBukti) : '') + '</div>' +
+        (b.status === 'ditolak' && b.alasanTolak ? '<div class="riwayat-info">Alasan ditolak: <b>' + esc(b.alasanTolak) + '</b></div>' : '') +
+        (b.status === 'menunggu' ? '<button type="button" class="tbl kecil-tbl garis" data-aksi="verifikasi" data-id="' + esc(b.id) + '">Verifikasi sekarang</button>' : '') +
+        '<button type="button" class="tbl kecil-tbl merah" data-aksi="hapus-bayar" data-id="' + esc(b.id) + '">Hapus catatan ini</button>' +
+        '</div>';
+    });
+
+    bukaLapis('Kamar ' + p.kamar + ' — ' + p.nama, isi);
+  }
+
+  /* ==========================================================
+     Verifikasi pembayaran (maksimal 3 ketukan)
+     ========================================================== */
+
+  function bukaVerifikasi(id) {
+    var b = cariPembayaran(id);
+    if (!b) return;
+    var p = cariPenghuni(b.penghuniId);
+    var isi = '<div class="kartu"><div class="kartu-isi">' +
+      '<div class="baris-judul"><span class="baris-kamar-no">Kamar ' + esc(p ? p.kamar : '?') + '</span>' +
+      '<span class="baris-nama">' + esc(p ? p.nama : 'Penghuni terhapus') + '</span></div>' +
+      '<div class="total-besar" style="margin-top:10px">' + RO.rupiah(b.jumlah) + '</div>' +
+      '<div class="ringkas">' +
+      '<div class="ringkas-baris"><span>Tanggal bayar</span><span class="tebal">' + esc(RO.labelTglPanjang(RO.parseTgl(b.tanggalBayar))) + '</span></div>' +
+      '<div class="ringkas-baris"><span>Catatan bukti</span><span class="tebal">' + esc(b.catatanBukti || '—') + '</span></div>' +
+      '</div></div></div>' +
+      '<button type="button" class="tbl hijau" data-aksi="setuju" data-id="' + esc(b.id) + '">✅ Setuju</button>' +
+      '<button type="button" class="tbl merah" data-aksi="tolak-buka" data-id="' + esc(b.id) + '">✖️ Tolak</button>' +
+      '<div id="kotakTolak" hidden>' +
+      '<label class="isian"><span class="nama-isian">Alasan ditolak</span>' +
+      '<input type="text" id="alasanTolak" placeholder="mis. bukti tidak terbaca"></label>' +
+      '<button type="button" class="tbl merah" data-aksi="tolak-simpan" data-id="' + esc(b.id) + '">Simpan penolakan</button>' +
+      '</div>';
+    bukaLapis('Verifikasi pembayaran', isi);
+  }
+
+  function lanjutSetelahVerifikasi() {
+    var sisa = db.pembayaran.filter(function (b) { return b.status === 'menunggu'; });
+    if (sisa.length) { saring = 'verifikasi'; tutupLapis(); }
+    else { saring = null; tutupLapis(); }
+  }
+
+  /* ==========================================================
+     Tagih & Buat Kartu
+     ========================================================== */
+
+  function bukaTagih(id) {
+    var p = cariPenghuni(id);
+    if (!p) return;
+    var h = RO.hitung(db, p, kini);
+    var tautan = RO.tautanKartu(db, p, kini);
+    var pesan = RO.draftPesan(h, tautan);
+    var isi = '<div class="kartu"><div class="kartu-isi">' +
+      '<div>' + lencanaStatus(h) + '</div>' +
+      '<p class="petunjuk">Draft dipilih otomatis sesuai status. Boleh diubah dulu sebelum dikirim.</p>' +
+      '<textarea id="teksPesan" rows="10">' + esc(pesan) + '</textarea>' +
+      '</div></div>' +
+      '<button type="button" class="tbl" data-aksi="salin-pesan">📋 Salin pesan</button>' +
+      (RO.nomorWA(p.noWA)
+        ? '<a class="tbl hijau" id="tautanWA" href="#" data-aksi="buka-wa" data-id="' + esc(p.id) + '">💬 Buka WhatsApp</a>'
+        : '<p class="petunjuk">Nomor WhatsApp penghuni ini belum diisi. Lengkapi lewat Pengaturan supaya tombol WhatsApp bisa dipakai.</p>');
+    bukaLapis('Tagih — ' + p.nama, isi);
+  }
+
+  function bukaKartu(id) {
+    var p = cariPenghuni(id);
+    if (!p) return;
+    var tautan = RO.tautanKartu(db, p, kini);
+    var isi = '<div class="catatan-potret">Tautan ini berisi potret data ' + esc(p.nama) +
+      ' per ' + esc(RO.labelTglPanjang(kini)) + '. Datanya menempel di dalam tautan dan tidak dikirim ke server mana pun. ' +
+      'Bila ada perubahan, buat tautan baru.</div>' +
+      '<div class="kartu"><div class="kartu-isi">' +
+      '<textarea id="teksTautan" rows="6" readonly>' + esc(tautan) + '</textarea>' +
+      '</div></div>' +
+      '<button type="button" class="tbl" data-aksi="salin-tautan">📋 Salin tautan</button>' +
+      '<a class="tbl garis" href="' + esc(tautan) + '" target="_blank" rel="noopener">👁️ Lihat kartunya</a>';
+    bukaLapis('Kartu Kamar — ' + p.nama, isi);
+  }
+
+  /* ==========================================================
+     GAMBAR — Catat pembayaran
+     ========================================================== */
+
+  function gambarCatat() {
+    var pilihan = db.penghuni.filter(function (p) { return p.aktif !== false; })
+      .slice().sort(function (a, b) { return a.kamar - b.kamar; })
+      .map(function (p) {
+        return '<option value="' + esc(p.id) + '">Kamar ' + esc(p.kamar) + ' — ' + esc(p.nama) + '</option>';
+      }).join('');
+
+    el('tab-catat').innerHTML =
+      '<h2 class="judul-bagian">Catat pembayaran</h2>' +
+      '<div class="kartu"><div class="kartu-isi">' +
+      '<p class="petunjuk">Catatan ini masuk ke antrean sebagai <b>menunggu verifikasi</b>. Perhitungan baru berubah setelah kamu menyetujuinya.</p>' +
+      '<form id="formCatat">' +
+      '<label class="isian"><span class="nama-isian">Penghuni</span>' +
+      '<select id="cPenghuni" required>' + (pilihan || '<option value="">Belum ada penghuni</option>') + '</select></label>' +
+      '<label class="isian"><span class="nama-isian">Tanggal bayar</span>' +
+      '<input type="date" id="cTanggal" value="' + RO.fmtTgl(kini) + '" required></label>' +
+      '<label class="isian"><span class="nama-isian">Jumlah</span>' +
+      '<input type="text" inputmode="numeric" id="cJumlah" data-uang placeholder="1.500.000" required></label>' +
+      '<p class="pratinjau-uang" id="cPratinjau">Rp 0</p>' +
+      '<label class="isian"><span class="nama-isian">Catatan bukti</span>' +
+      '<input type="text" id="cBukti" placeholder="mis. screenshot BCA 08/08"></label>' +
+      '<button type="submit" class="tbl">Simpan ke antrean</button>' +
+      '</form></div></div>';
+  }
+
+  /* ==========================================================
+     GAMBAR — Pengaturan
+     ========================================================== */
+
+  function gambarAtur() {
+    var st = db.pengaturan;
+    var isi = '';
+
+    isi += '<h2 class="judul-bagian">Aturan kos</h2>' +
+      '<div class="kartu"><div class="kartu-isi"><form id="formAturan">' +
+      '<label class="isian"><span class="nama-isian">Nama kos</span>' +
+      '<input type="text" id="aNama" value="' + esc(st.namaKos) + '"></label>' +
+      '<label class="isian"><span class="nama-isian">Denda tetap per bulan telat</span>' +
+      '<input type="text" inputmode="numeric" id="aDenda" data-uang value="' + esc(titik(st.dendaTetap)) + '"></label>' +
+      '<p class="petunjuk">Perubahan tarif hanya berlaku untuk denda yang <b>timbul sesudah hari ini</b>. Denda lama tetap memakai tarif saat itu.</p>' +
+      '<label class="isian"><span class="nama-isian">Tenggat setelah jatuh tempo (hari)</span>' +
+      '<input type="number" id="aTenggat" min="0" max="60" step="1" value="' + esc(st.tenggatHari) + '"></label>' +
+      '<label class="isian"><span class="nama-isian">Tanggal mulai sistem</span>' +
+      '<input type="date" id="aPotong" value="' + esc(st.tanggalPotong) + '"></label>' +
+      '<p class="petunjuk">Bulan sebelum tanggal ini tidak dihitung ulang. Tunggakan lama cukup diisi sebagai <b>posisi awal</b> di data penghuni.</p>' +
+      '<button type="submit" class="tbl">Simpan aturan</button>' +
+      '</form></div></div>';
+
+    isi += '<h2 class="judul-bagian">Data penghuni</h2>';
+    db.penghuni.slice().sort(function (a, b) { return a.kamar - b.kamar; }).forEach(function (p) {
+      var sa = null;
+      for (var i = 0; i < db.saldoAwal.length; i++) if (db.saldoAwal[i].penghuniId === p.id) sa = db.saldoAwal[i];
+      isi += '<button type="button" class="antre" style="border-left-color:var(--biru)" data-aksi="edit-penghuni" data-id="' + esc(p.id) + '">' +
+        '<div class="baris-judul"><span class="baris-kamar-no">Kamar ' + esc(p.kamar) + '</span>' +
+        '<span class="baris-nama">' + esc(p.nama) + '</span></div>' +
+        '<div class="riwayat-info">Sewa ' + RO.rupiah(p.sewa) + ' · ulang bulan tgl ' + esc(p.tglUlangBulan) +
+        (p.aktif === false ? ' · <b>tidak aktif</b>' : '') +
+        (sa && sa.pokokTertunggak > 0 ? ' · posisi awal ' + RO.rupiah(sa.pokokTertunggak) : '') +
+        '</div></button>';
+    });
+    isi += '<button type="button" class="tbl garis" data-aksi="edit-penghuni" data-id="">➕ Tambah penghuni</button>';
+
+    isi += '<h2 class="judul-bagian">Pembebasan denda</h2>' +
+      '<div class="kartu"><div class="kartu-isi sunyi">' +
+      'Denda dibebaskan per penghuni per bulan. Buka <b>Beranda → ketuk baris kamar</b>, lalu tekan <b>Bebaskan</b> pada bulan yang dituju. ' +
+      'Saat ini ada <b>' + db.waive.length + '</b> denda yang dibebaskan.' +
+      '</div></div>';
+
+    isi += '<h2 class="judul-bagian">Cadangan data</h2>' +
+      '<div class="kartu"><div class="kartu-isi">' +
+      '<p class="petunjuk">Data hanya tersimpan di peramban HP ini. Kalau riwayat peramban dibersihkan atau HP berganti, data bisa hilang. ' +
+      'Ekspor rutin, lalu simpan berkasnya di WhatsApp atau surel sendiri.</p>' +
+      '<button type="button" class="tbl" data-aksi="ekspor">⬇️ Ekspor data (JSON)</button>' +
+      '<button type="button" class="tbl garis" data-aksi="impor">⬆️ Impor data (JSON)</button>' +
+      '</div></div>';
+
+    isi += '<h2 class="judul-bagian">Penghalusan pesan (opsional)</h2>' +
+      '<div class="kartu"><div class="kartu-isi"><form id="formApi">' +
+      '<label class="isian"><span class="nama-isian">Kunci API</span>' +
+      '<input type="password" id="aApi" autocomplete="off" value="' + esc(st.kunciApi || '') + '" placeholder="kosongkan bila tidak dipakai"></label>' +
+      '<p class="petunjuk">Opsional. Bila diisi, draft pesan dihaluskan otomatis. Kunci disimpan hanya di perangkat ini. ' +
+      'Aplikasi berfungsi penuh tanpa kunci ini — draft memakai template.</p>' +
+      '<button type="submit" class="tbl garis">Simpan kunci</button>' +
+      '</form></div></div>';
+
+    isi += '<h2 class="judul-bagian">Muat ulang data</h2>' +
+      '<div class="kartu"><div class="kartu-isi">' +
+      '<button type="button" class="tbl abu" data-aksi="reset-contoh">🔁 Reset ke data contoh</button>' +
+      '<button type="button" class="tbl merah" data-aksi="kosongkan">🗑️ Kosongkan semua data</button>' +
+      '</div></div>';
+
+    el('tab-atur').innerHTML = isi;
+  }
+
+  /* ---------------- Form penghuni ---------------- */
+
+  function bukaEditPenghuni(id) {
+    var p = id ? cariPenghuni(id) : null;
+    var sa = null;
+    if (p) { for (var i = 0; i < db.saldoAwal.length; i++) if (db.saldoAwal[i].penghuniId === p.id) sa = db.saldoAwal[i]; }
+
+    var isi = '<div class="kartu"><div class="kartu-isi"><form id="formPenghuni" data-id="' + esc(id || '') + '">' +
+      '<label class="isian"><span class="nama-isian">Nomor kamar (1–8)</span>' +
+      '<input type="number" id="pKamar" min="1" max="99" step="1" required value="' + esc(p ? p.kamar : '') + '"></label>' +
+      '<label class="isian"><span class="nama-isian">Nama</span>' +
+      '<input type="text" id="pNama" required value="' + esc(p ? p.nama : '') + '"></label>' +
+      '<label class="isian"><span class="nama-isian">Tanggal ulang bulan (1–31)</span>' +
+      '<input type="number" id="pUlang" min="1" max="31" step="1" required value="' + esc(p ? p.tglUlangBulan : '') + '"></label>' +
+      '<p class="petunjuk">Kalau tanggalnya 29, 30, atau 31, pada bulan pendek otomatis mundur ke hari terakhir bulan itu.</p>' +
+      '<label class="isian"><span class="nama-isian">Sewa per bulan</span>' +
+      '<input type="text" inputmode="numeric" id="pSewa" data-uang required value="' + esc(p ? titik(p.sewa) : '') + '"></label>' +
+      '<label class="isian"><span class="nama-isian">Nomor WhatsApp</span>' +
+      '<input type="tel" id="pWA" placeholder="08xxxxxxxxxx" value="' + esc(p ? p.noWA : '') + '"></label>' +
+      '<label class="centang"><input type="checkbox" id="pAktif"' + (!p || p.aktif !== false ? ' checked' : '') + '>' +
+      '<span>Masih menghuni (tampil di daftar kamar)</span></label>' +
+
+      '<hr class="pemisah">' +
+      '<h2 class="judul-bagian" style="margin-top:0">Posisi awal</h2>' +
+      '<p class="petunjuk">Tunggakan sebelum sistem dipakai. Denda masa lalu selalu dianggap <b>nol</b> dan dihapus seluruhnya.</p>' +
+      '<label class="isian"><span class="nama-isian">Bulan tertunggak</span>' +
+      '<input type="number" id="sBulan" min="0" max="60" step="1" value="' + esc(sa ? sa.bulanTertunggak : 0) + '"></label>' +
+      '<label class="isian"><span class="nama-isian">Pokok tertunggak</span>' +
+      '<input type="text" inputmode="numeric" id="sPokok" data-uang value="' + esc(sa ? titik(sa.pokokTertunggak) : '') + '"></label>' +
+      '<label class="isian"><span class="nama-isian">Sejak bulan</span>' +
+      '<input type="text" id="sSejak" placeholder="2026-03" value="' + esc(sa ? sa.sejakBulan : '') + '"></label>' +
+
+      '<button type="submit" class="tbl">Simpan</button>' +
+      '</form>' +
+      (p ? '<button type="button" class="tbl merah" data-aksi="hapus-penghuni" data-id="' + esc(p.id) + '">Hapus penghuni ini</button>' : '') +
+      '</div></div>';
+
+    bukaLapis(p ? 'Ubah — ' + p.nama : 'Tambah penghuni', isi);
+  }
+
+  /* ---------------- Ekspor / Impor ---------------- */
+
+  function bukaEkspor() {
+    var teks = JSON.stringify(db, null, 2);
+    var nama = 'rumah-opung-' + RO.fmtTgl(kini) + '.json';
+    var tautanUnduh = '';
+    try {
+      var blob = new Blob([teks], { type: 'application/json' });
+      tautanUnduh = URL.createObjectURL(blob);
+    } catch (e) { tautanUnduh = ''; }
+
+    var isi = '<div class="kartu"><div class="kartu-isi">' +
+      '<p class="petunjuk">Simpan berkas ini di tempat yang aman. Untuk memulihkan, pakai tombol <b>Impor data</b>.</p>' +
+      (tautanUnduh ? '<a class="tbl" href="' + tautanUnduh + '" download="' + nama + '">⬇️ Unduh ' + nama + '</a>' : '') +
+      '<button type="button" class="tbl garis" data-aksi="salin-ekspor">📋 Salin isinya</button>' +
+      '<textarea id="teksEkspor" rows="10" readonly>' + esc(teks) + '</textarea>' +
+      '</div></div>';
+    bukaLapis('Ekspor data', isi);
+  }
+
+  function bukaImpor() {
+    var isi = '<div class="kartu"><div class="kartu-isi">' +
+      '<p class="petunjuk">Impor akan <b>mengganti seluruh data</b> yang ada di perangkat ini. Sebaiknya ekspor dulu sebelum mengimpor.</p>' +
+      '<label class="isian"><span class="nama-isian">Pilih berkas JSON</span>' +
+      '<input type="file" id="berkasImpor" accept="application/json,.json"></label>' +
+      '<label class="isian"><span class="nama-isian">Atau tempel isinya di sini</span>' +
+      '<textarea id="teksImpor" rows="8" placeholder="tempel isi berkas JSON"></textarea></label>' +
+      '<button type="button" class="tbl" data-aksi="impor-jalan">Impor sekarang</button>' +
+      '</div></div>';
+    bukaLapis('Impor data', isi);
+  }
+
+  function jalankanImpor(teks) {
+    var baru;
+    try { baru = JSON.parse(teks); }
+    catch (e) { toast('Berkas tidak terbaca. Pastikan isinya berkas ekspor Rumah Opung.'); return; }
+    if (!baru || typeof baru !== 'object' || !Array.isArray(baru.penghuni)) {
+      toast('Isi berkas tidak cocok. Pastikan itu berkas ekspor Rumah Opung.');
+      return;
+    }
+    if (!window.confirm('Ganti seluruh data di perangkat ini dengan isi berkas tadi?')) return;
+    db = RO.rapikanDb(baru, kini);
+    RO.simpan(db);
+    tutupLapis();
+    saring = null;
+    gambar();
+    toast('Data berhasil diimpor.');
+  }
+
+  /* ==========================================================
+     Gambar utama & navigasi
+     ========================================================== */
+
+  function gambar() {
+    kini = RO.hariIni();
+    document.title = db.pengaturan.namaKos + ' — Papan Kendali';
+    el('judulKos').textContent = db.pengaturan.namaKos;
+    el('tanggalHariIni').textContent = 'Hari ini ' + RO.labelTglPanjang(kini);
+
+    ['beranda', 'catat', 'atur'].forEach(function (n) {
+      el('tab-' + n).hidden = (n !== tab);
+    });
+    var tombol = document.querySelectorAll('#navBawah .nav-tombol');
+    for (var i = 0; i < tombol.length; i++) {
+      tombol[i].classList.toggle('aktif', tombol[i].getAttribute('data-tab') === tab);
+    }
+
+    if (tab === 'beranda') gambarBeranda();
+    else if (tab === 'catat') gambarCatat();
+    else gambarAtur();
+  }
+
+  /* ==========================================================
+     Penangan kejadian
+     ========================================================== */
+
+  var AKSI = {
+    saring: function (t) {
+      var nilai = t.getAttribute('data-nilai');
+      saring = (saring === nilai) ? null : nilai;
+      gambar();
+    },
+    detail: function (t) { bukaDetail(t.getAttribute('data-id')); },
+    tagih: function (t) { bukaTagih(t.getAttribute('data-id')); },
+    kartu: function (t) { bukaKartu(t.getAttribute('data-id')); },
+    verifikasi: function (t) { bukaVerifikasi(t.getAttribute('data-id')); },
+
+    setuju: function (t) {
+      var b = cariPembayaran(t.getAttribute('data-id'));
+      if (!b) return;
+      b.status = 'disetujui';
+      b.alasanTolak = '';
+      RO.simpan(db);
+      lanjutSetelahVerifikasi();
+      gambar();
+      toast('Pembayaran disetujui.');
+    },
+
+    'tolak-buka': function () {
+      var k = el('kotakTolak');
+      if (k) { k.hidden = false; var a = el('alasanTolak'); if (a) a.focus(); }
+    },
+
+    'tolak-simpan': function (t) {
+      var b = cariPembayaran(t.getAttribute('data-id'));
+      if (!b) return;
+      var a = el('alasanTolak');
+      b.status = 'ditolak';
+      b.alasanTolak = a ? a.value.trim() : '';
+      RO.simpan(db);
+      lanjutSetelahVerifikasi();
+      gambar();
+      toast('Pembayaran ditolak.');
+    },
+
+    'hapus-bayar': function (t) {
+      if (!window.confirm('Hapus catatan pembayaran ini?')) return;
+      var id = t.getAttribute('data-id');
+      db.pembayaran = db.pembayaran.filter(function (b) { return b.id !== id; });
+      RO.simpan(db);
+      tutupLapis();
+      gambar();
+      toast('Catatan dihapus.');
+    },
+
+    waive: function (t) {
+      var id = t.getAttribute('data-id');
+      var bulan = t.getAttribute('data-bulan');
+      var k = RO.kunciWaive(id, bulan);
+      var i = db.waive.indexOf(k);
+      if (i >= 0) db.waive.splice(i, 1); else db.waive.push(k);
+      RO.simpan(db);
+      bukaDetail(id);
+      gambar();
+      toast(i >= 0 ? 'Denda diaktifkan lagi.' : 'Denda dibebaskan.');
+    },
+
+    'salin-pesan': function () { var e = el('teksPesan'); if (e) salin(e.value); },
+    'salin-tautan': function () { var e = el('teksTautan'); if (e) salin(e.value); },
+    'salin-ekspor': function () { var e = el('teksEkspor'); if (e) salin(e.value); },
+
+    'buka-wa': function (t, ev) {
+      ev.preventDefault();
+      var p = cariPenghuni(t.getAttribute('data-id'));
+      var e = el('teksPesan');
+      if (!p || !e) return;
+      window.open(RO.tautanWA(p.noWA, e.value), '_blank');
+    },
+
+    'edit-penghuni': function (t) { bukaEditPenghuni(t.getAttribute('data-id')); },
+
+    'hapus-penghuni': function (t) {
+      var id = t.getAttribute('data-id');
+      var p = cariPenghuni(id);
+      if (!p) return;
+      if (!window.confirm('Hapus ' + p.nama + ' beserta seluruh catatan pembayarannya?')) return;
+      db.penghuni = db.penghuni.filter(function (x) { return x.id !== id; });
+      db.saldoAwal = db.saldoAwal.filter(function (x) { return x.penghuniId !== id; });
+      db.pembayaran = db.pembayaran.filter(function (x) { return x.penghuniId !== id; });
+      db.waive = db.waive.filter(function (x) { return x.split('|')[0] !== id; });
+      RO.simpan(db);
+      tutupLapis();
+      gambar();
+      toast('Penghuni dihapus.');
+    },
+
+    ekspor: function () { bukaEkspor(); },
+    impor: function () { bukaImpor(); },
+
+    'impor-jalan': function () {
+      var berkas = el('berkasImpor');
+      var teks = el('teksImpor');
+      if (berkas && berkas.files && berkas.files[0]) {
+        var fr = new FileReader();
+        fr.onload = function () { jalankanImpor(String(fr.result)); };
+        fr.onerror = function () { toast('Berkas tidak bisa dibaca.'); };
+        fr.readAsText(berkas.files[0]);
+      } else if (teks && teks.value.trim()) {
+        jalankanImpor(teks.value.trim());
+      } else {
+        toast('Pilih berkas atau tempel isinya dulu.');
+      }
+    },
+
+    'reset-contoh': function () {
+      if (!window.confirm('Ganti seluruh data dengan data contoh 8 penghuni?')) return;
+      db = RO.dataContoh(RO.hariIni());
+      RO.simpan(db);
+      saring = null;
+      tab = 'beranda';
+      gambar();
+      toast('Data contoh dimuat.');
+    },
+
+    kosongkan: function () {
+      if (!window.confirm('Kosongkan SEMUA data? Tindakan ini tidak bisa dibatalkan.')) return;
+      if (!window.confirm('Yakin? Sebaiknya ekspor dulu sebagai cadangan.')) return;
+      db = RO.dbKosong(RO.hariIni());
+      RO.simpan(db);
+      saring = null;
+      tab = 'beranda';
+      gambar();
+      toast('Semua data dikosongkan.');
+    }
+  };
+
+  function pasangKejadian() {
+    document.addEventListener('click', function (ev) {
+      var nav = ev.target.closest ? ev.target.closest('#navBawah .nav-tombol') : null;
+      if (nav) {
+        tab = nav.getAttribute('data-tab');
+        saring = null;
+        gambar();
+        window.scrollTo(0, 0);
+        return;
+      }
+      var t = ev.target.closest ? ev.target.closest('[data-aksi]') : null;
+      if (t && AKSI[t.getAttribute('data-aksi')]) {
+        AKSI[t.getAttribute('data-aksi')](t, ev);
+      }
+    });
+
+    el('lapisTutup').addEventListener('click', tutupLapis);
+    el('lapis').addEventListener('click', function (ev) {
+      if (ev.target === el('lapis')) tutupLapis();
+    });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && lapisTerbuka()) tutupLapis();
+    });
+
+    /* Format otomatis isian uang */
+    document.addEventListener('input', function (ev) {
+      var t = ev.target;
+      if (!t || !t.hasAttribute || !t.hasAttribute('data-uang')) return;
+      var angka = t.value.replace(/[^0-9]/g, '');
+      t.value = angka ? titik(Number(angka)) : '';
+      if (t.id === 'cJumlah') {
+        var pv = el('cPratinjau');
+        if (pv) pv.textContent = RO.rupiah(Number(angka || 0));
+      }
+    });
+
+    /* Semua form ditangani di satu tempat */
+    document.addEventListener('submit', function (ev) {
+      var f = ev.target;
+      if (f.id === 'formCatat') { ev.preventDefault(); simpanCatat(); }
+      else if (f.id === 'formAturan') { ev.preventDefault(); simpanAturan(); }
+      else if (f.id === 'formPenghuni') { ev.preventDefault(); simpanPenghuni(f.getAttribute('data-id')); }
+      else if (f.id === 'formApi') { ev.preventDefault(); simpanApi(); }
+    });
+  }
+
+  function bacaUang(id) {
+    var e = el(id);
+    if (!e) return 0;
+    return Number(String(e.value).replace(/[^0-9]/g, '')) || 0;
+  }
+
+  function simpanCatat() {
+    var idP = el('cPenghuni').value;
+    var tanggal = el('cTanggal').value;
+    var jumlah = bacaUang('cJumlah');
+    if (!idP) { toast('Pilih penghuni dulu.'); return; }
+    if (!tanggal) { toast('Isi tanggal bayarnya.'); return; }
+    if (jumlah <= 0) { toast('Jumlah harus lebih dari nol.'); return; }
+    db.pembayaran.push({
+      id: idBaru('b', db.pembayaran),
+      penghuniId: idP,
+      tanggalBayar: tanggal,
+      jumlah: jumlah,
+      catatanBukti: el('cBukti').value.trim(),
+      status: 'menunggu',
+      alasanTolak: ''
+    });
+    RO.simpan(db);
+    tab = 'beranda';
+    saring = 'verifikasi';
+    gambar();
+    window.scrollTo(0, 0);
+    toast('Masuk antrean. Tinggal diverifikasi.');
+  }
+
+  function simpanAturan() {
+    var st = db.pengaturan;
+    st.namaKos = el('aNama').value.trim() || 'Rumah Opung';
+    var dendaBaru = bacaUang('aDenda');
+    if (dendaBaru > 0 && dendaBaru !== st.dendaTetap) {
+      var hari = RO.fmtTgl(kini);
+      st.dendaRiwayat = st.dendaRiwayat.filter(function (x) { return x.sejak !== hari; });
+      st.dendaRiwayat.push({ sejak: hari, nilai: dendaBaru });
+      st.dendaRiwayat.sort(function (a, b) { return a.sejak < b.sejak ? -1 : 1; });
+      st.dendaTetap = dendaBaru;
+    }
+    var tenggat = parseInt(el('aTenggat').value, 10);
+    if (!isNaN(tenggat) && tenggat >= 0) st.tenggatHari = tenggat;
+    var potong = el('aPotong').value;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(potong)) st.tanggalPotong = potong;
+    simpanDanGambar();
+    toast('Aturan disimpan.');
+  }
+
+  function simpanApi() {
+    db.pengaturan.kunciApi = el('aApi').value.trim();
+    RO.simpan(db);
+    toast(db.pengaturan.kunciApi
+      ? 'Kunci disimpan di perangkat ini. Penghalusan otomatis belum aktif di versi ini.'
+      : 'Kunci dikosongkan. Draft memakai template.');
+  }
+
+  function simpanPenghuni(id) {
+    var kamar = parseInt(el('pKamar').value, 10);
+    var nama = el('pNama').value.trim();
+    var ulang = parseInt(el('pUlang').value, 10);
+    var sewa = bacaUang('pSewa');
+    if (!nama) { toast('Nama belum diisi.'); return; }
+    if (isNaN(kamar) || kamar < 1) { toast('Nomor kamar tidak sah.'); return; }
+    if (isNaN(ulang) || ulang < 1 || ulang > 31) { toast('Tanggal ulang bulan harus 1 sampai 31.'); return; }
+    if (sewa <= 0) { toast('Sewa harus lebih dari nol.'); return; }
+
+    var p = id ? cariPenghuni(id) : null;
+    if (!p) {
+      p = { id: idBaru('p', db.penghuni) };
+      db.penghuni.push(p);
+    }
+    p.kamar = kamar;
+    p.nama = nama;
+    p.tglUlangBulan = ulang;
+    p.sewa = sewa;
+    p.noWA = el('pWA').value.trim();
+    p.aktif = el('pAktif').checked;
+
+    /* Posisi awal (F8) */
+    var sBulan = parseInt(el('sBulan').value, 10) || 0;
+    var sPokok = bacaUang('sPokok');
+    var sSejak = el('sSejak').value.trim();
+    db.saldoAwal = db.saldoAwal.filter(function (x) { return x.penghuniId !== p.id; });
+    if (sPokok > 0) {
+      db.saldoAwal.push({
+        penghuniId: p.id,
+        bulanTertunggak: sBulan,
+        pokokTertunggak: sPokok,
+        sejakBulan: /^\d{4}-\d{2}$/.test(sSejak) ? sSejak : ''
+      });
+    }
+
+    RO.simpan(db);
+    tutupLapis();
+    gambar();
+    toast('Data penghuni disimpan.');
+  }
+
+  /* ==========================================================
+     Titik masuk
+     ========================================================== */
+
+  RO.mulaiPapanKendali = function () {
+    kini = RO.hariIni();
+    db = RO.muat();
+    if (!db) {
+      db = RO.dataContoh(kini);
+      RO.simpan(db);
+    }
+    pasangKejadian();
+    gambar();
+  };
+})();
+
 if (typeof module !== 'undefined' && module.exports) module.exports = RO;

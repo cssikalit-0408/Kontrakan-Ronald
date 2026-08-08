@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#15395b">
+<title>Rumah Opung — Papan Kendali</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🏠</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="atas">
+  <div class="bungkus">
+    <h1 id="judulKos">Rumah Opung</h1>
+    <p class="atas-tgl" id="tanggalHariIni"></p>
+  </div>
+</header>
+
+<main class="bungkus" id="isi">
+
+  <section class="tab-isi" id="tab-beranda">
+    <div id="panelHariIni"></div>
+    <div id="daftarKamar"></div>
+  </section>
+
+  <section class="tab-isi" id="tab-catat" hidden></section>
+
+  <section class="tab-isi" id="tab-atur" hidden></section>
+
+</main>
+
+<nav class="bawah" id="navBawah" aria-label="Menu utama">
+  <button type="button" class="nav-tombol aktif" data-tab="beranda">
+    <span class="nav-ikon" aria-hidden="true">🏠</span>Beranda
+  </button>
+  <button type="button" class="nav-tombol" data-tab="catat">
+    <span class="nav-ikon" aria-hidden="true">✍️</span>Catat bayar
+  </button>
+  <button type="button" class="nav-tombol" data-tab="atur">
+    <span class="nav-ikon" aria-hidden="true">⚙️</span>Pengaturan
+  </button>
+</nav>
+
+<div class="lapis" id="lapis" hidden>
+  <div class="lapis-kotak" role="dialog" aria-modal="true" aria-labelledby="lapisJudul">
+    <div class="lapis-atas">
+      <h2 id="lapisJudul">Judul</h2>
+      <button type="button" class="tutup" id="lapisTutup" aria-label="Tutup">✕</button>
+    </div>
+    <div class="lapis-isi" id="lapisIsi"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+<script>RO.mulaiPapanKendali();</script>
+</body>
+</html>
