@@ -142,6 +142,16 @@ var RO = (function () {
     }
     db.pengaturan.dendaRiwayat.sort(function (a, b) { return a.sejak < b.sejak ? -1 : 1; });
     db.penghuni = db.penghuni || [];
+    /* Riwayat sewa. Data lama hanya punya satu angka `sewa`; angka itu
+       dijadikan tarif yang berlaku sejak awal supaya riwayat yang sudah
+       tercatat tidak bergeser sama sekali. */
+    db.penghuni.forEach(function (p) {
+      if (!p.sewaRiwayat || !p.sewaRiwayat.length) {
+        p.sewaRiwayat = [{ sejak: '2000-01-01', nilai: Math.round(p.sewa) || 0 }];
+      }
+      p.sewaRiwayat.sort(function (a, b) { return a.sejak < b.sejak ? -1 : 1; });
+      p.sewa = p.sewaRiwayat[p.sewaRiwayat.length - 1].nilai;
+    });
     db.saldoAwal = db.saldoAwal || [];
     db.pembayaran = db.pembayaran || [];
     db.waive = db.waive || [];
@@ -184,6 +194,20 @@ var RO = (function () {
     return nilai;
   }
 
+  /* Tarif sewa yang berlaku pada suatu tanggal.
+     Pasangan dari tarifDendaPada: menaikkan sewa TIDAK boleh mengubah
+     bulan-bulan yang sudah lewat, karena itu akan memunculkan kekurangan
+     bayar dan denda untuk keterlambatan yang tidak pernah terjadi. */
+  function tarifSewaPada(p, tanggal) {
+    var r = p.sewaRiwayat;
+    if (!r || !r.length) return Math.round(p.sewa) || 0;
+    var nilai = r[0].nilai;
+    for (var i = 0; i < r.length; i++) {
+      if (parseTgl(r[i].sejak).getTime() <= tanggal.getTime()) nilai = r[i].nilai;
+    }
+    return Math.round(nilai);
+  }
+
   /* Bangun daftar periode bulanan sejak tanggal potong (F1). */
   function bangunPeriode(db, p, today) {
     var potong = parseTgl(db.pengaturan.tanggalPotong);
@@ -201,7 +225,8 @@ var RO = (function () {
           bulanIndeks: cur.getMonth(),
           jatuhTempo: jt,
           batasBayar: batasBayar(jt, tenggat),
-          pokok: Math.round(p.sewa)
+          /* Tarif yang berlaku saat bulan itu jatuh tempo, bukan tarif hari ini */
+          pokok: tarifSewaPada(p, jt)
         });
       }
       cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
@@ -649,7 +674,7 @@ var RO = (function () {
       alasanTolak: ''
     });
 
-    return db;
+    return rapikanDb(db, T);
   }
 
   /* ==========================================================
@@ -677,6 +702,7 @@ var RO = (function () {
     hitung: hitung,
     hitungSemua: hitungSemua,
     tarifDendaPada: tarifDendaPada,
+    tarifSewaPada: tarifSewaPada,
     kunciWaive: kunciWaive,
     INFO_STATUS: INFO_STATUS,
     /* penyimpanan */
@@ -915,6 +941,9 @@ var RO = (function () {
       '<div style="margin-top:6px">' + lencanaStatus(h) + '</div>' +
       '<div class="ringkas">' +
       '<div class="ringkas-baris"><span>Sewa per bulan</span><span class="tebal">' + RO.rupiah(p.sewa) + '</span></div>' +
+      (p.sewaRiwayat && p.sewaRiwayat.length > 1
+        ? '<div class="ringkas-baris"><span>Sewa pernah berubah</span><span class="tebal">' +
+          p.sewaRiwayat.length + ' tarif</span></div>' : '') +
       '<div class="ringkas-baris"><span>Tanggal ulang bulan</span><span class="tebal">tiap tanggal ' + esc(p.tglUlangBulan) + '</span></div>' +
       '<div class="ringkas-baris"><span>Sisa pokok</span><span class="tebal">' + RO.rupiah(h.totalSisaPokok) + '</span></div>' +
       '<div class="ringkas-baris"><span>Denda belum dibayar</span><span class="tebal">' + RO.rupiah(h.totalSisaDenda) + '</span></div>';
@@ -1185,6 +1214,21 @@ var RO = (function () {
 
   /* ---------------- Form penghuni ---------------- */
 
+  function riwayatSewaHtml(p) {
+    var r = p.sewaRiwayat || [];
+    if (r.length < 2) return '';
+    var out = '<div class="riwayat-baris"><div class="riwayat-kepala"><span>Riwayat sewa</span></div>';
+    r.slice().reverse().forEach(function (x) {
+      /* '2000-01-01' adalah penanda "sejak awal", jangan ditampilkan apa adanya */
+      var sejak = x.sejak === '2000-01-01' ? 'sejak awal' : 'sejak ' + RO.labelTgl(RO.parseTgl(x.sejak));
+      out += '<div class="riwayat-denda"><span><b>' + RO.rupiah(x.nilai) + '</b> ' +
+        '<span class="sunyi">' + esc(sejak) + '</span></span>' +
+        '<button type="button" data-aksi="hapus-sewa" data-id="' + esc(p.id) + '" data-sejak="' + esc(x.sejak) + '">Hapus</button>' +
+        '</div>';
+    });
+    return out + '</div>';
+  }
+
   function bukaEditPenghuni(id) {
     var p = id ? cariPenghuni(id) : null;
     var sa = null;
@@ -1200,6 +1244,10 @@ var RO = (function () {
       '<p class="petunjuk">Kalau tanggalnya 29, 30, atau 31, pada bulan pendek otomatis mundur ke hari terakhir bulan itu.</p>' +
       '<label class="isian"><span class="nama-isian">Sewa per bulan</span>' +
       '<input type="text" inputmode="numeric" id="pSewa" data-uang required value="' + esc(p ? titik(p.sewa) : '') + '"></label>' +
+      (p ? '<label class="isian"><span class="nama-isian">Kalau sewa diubah, berlaku mulai bulan</span>' +
+        '<input type="month" id="pSewaMulai" value="' + esc(RO.kodeBulan(new Date(kini.getFullYear(), kini.getMonth() + 1, 1))) + '"></label>' +
+        '<p class="petunjuk">Bulan-bulan sebelumnya tetap memakai sewa lama, jadi riwayat yang sudah lunas tidak ikut berubah.</p>' +
+        riwayatSewaHtml(p) : '') +
       '<label class="isian"><span class="nama-isian">Nomor WhatsApp</span>' +
       '<input type="tel" id="pWA" placeholder="08xxxxxxxxxx" value="' + esc(p ? p.noWA : '') + '"></label>' +
       '<label class="centang"><input type="checkbox" id="pAktif"' + (!p || p.aktif !== false ? ' checked' : '') + '>' +
@@ -1389,6 +1437,20 @@ var RO = (function () {
       toast('Penghuni dihapus.');
     },
 
+    'hapus-sewa': function (t) {
+      var id = t.getAttribute('data-id');
+      var sejak = t.getAttribute('data-sejak');
+      var p = cariPenghuni(id);
+      if (!p || !p.sewaRiwayat || p.sewaRiwayat.length < 2) return;
+      if (!window.confirm('Hapus tarif sewa ini dari riwayat? Bulan yang memakainya akan dihitung ulang dengan tarif sebelumnya.')) return;
+      p.sewaRiwayat = p.sewaRiwayat.filter(function (x) { return x.sejak !== sejak; });
+      p.sewa = p.sewaRiwayat[p.sewaRiwayat.length - 1].nilai;
+      RO.simpan(db);
+      bukaEditPenghuni(id);
+      gambar();
+      toast('Tarif dihapus dari riwayat sewa.');
+    },
+
     ekspor: function () { bukaEkspor(); },
     impor: function () { bukaImpor(); },
 
@@ -1550,7 +1612,21 @@ var RO = (function () {
     p.kamar = kamar;
     p.nama = nama;
     p.tglUlangBulan = ulang;
-    p.sewa = sewa;
+
+    /* Perubahan sewa hanya berlaku ke depan. Tarif lama tetap dipakai untuk
+       bulan-bulan sebelum tanggal berlakunya, supaya riwayat tidak bergeser. */
+    if (!p.sewaRiwayat || !p.sewaRiwayat.length) {
+      p.sewaRiwayat = [{ sejak: '2000-01-01', nilai: sewa }];
+    } else if (sewa !== p.sewaRiwayat[p.sewaRiwayat.length - 1].nilai) {
+      var eMulai = el('pSewaMulai');
+      var mulai = eMulai ? eMulai.value : '';
+      var sejak = /^\d{4}-\d{2}$/.test(mulai) ? mulai + '-01' : RO.fmtTgl(kini);
+      p.sewaRiwayat = p.sewaRiwayat.filter(function (x) { return x.sejak !== sejak; });
+      p.sewaRiwayat.push({ sejak: sejak, nilai: sewa });
+      p.sewaRiwayat.sort(function (a, b) { return a.sejak < b.sejak ? -1 : 1; });
+    }
+    p.sewa = p.sewaRiwayat[p.sewaRiwayat.length - 1].nilai;
+
     p.noWA = el('pWA').value.trim();
     p.aktif = el('pAktif').checked;
 

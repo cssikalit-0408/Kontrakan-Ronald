@@ -309,8 +309,8 @@ label.isian > span.nama-isian {
   margin-bottom: 6px;
 }
 
-input[type="text"], input[type="date"], input[type="number"],
-input[type="tel"], input[type="password"], select, textarea {
+input[type="text"], input[type="date"], input[type="month"], input[type="number"],
+input[type="tel"], input[type="password"], input[type="file"], select, textarea {
   width: 100%;
   min-height: 50px;
   font: inherit;
@@ -343,8 +343,21 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .petunjuk { font-size: 13px; color: var(--tinta-lembut); margin: 6px 0 0; }
 .pratinjau-uang { font-size: 15px; font-weight: 700; color: var(--biru); margin: 6px 0 0; }
 
-.centang { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; }
-.centang input { width: 24px; height: 24px; min-height: 24px; flex: 0 0 auto; margin-top: 2px; }
+/* Seluruh baris ikut bisa disentuh, bukan hanya kotak centangnya */
+.centang {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  min-height: 52px;
+  padding: 8px 12px;
+  border: 2px solid var(--garis);
+  border-radius: 12px;
+  background: var(--kertas);
+  cursor: pointer;
+}
+
+.centang input { width: 26px; height: 26px; min-height: 26px; flex: 0 0 auto; }
 
 /* ---------------- Riwayat ---------------- */
 
@@ -388,7 +401,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 }
 
 .riwayat-denda button {
-  min-height: 40px;
+  min-height: 44px;
   border-radius: 10px;
   border: 2px solid var(--garis);
   background: var(--kertas);

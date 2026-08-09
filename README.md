@@ -101,6 +101,16 @@ tanggal 3, isi `3`. Kalau tanggalnya 29, 30, atau 31, aplikasi otomatis mundur k
 hari terakhir bulan pendek — jadi ulang bulan tanggal 31 jatuh tempo 28 Februari.
 Tidak perlu diatur manual.
 
+**Sewa per bulan.** Kalau suatu saat sewanya naik, ubah angkanya lalu isi
+**berlaku mulai bulan** — bawaannya bulan depan. Bulan-bulan sebelumnya tetap
+memakai tarif lama, jadi riwayat yang sudah lunas tidak ikut berubah.
+
+Ini penting. Tanpa tanggal berlaku, menaikkan sewa Rp 100.000 akan membuat
+setiap bulan yang sudah lewat mendadak kurang bayar Rp 100.000, lalu ikut kena
+denda — penghuni yang tidak pernah telat bisa tiba-tiba tampak menunggak jutaan
+rupiah. Semua tarif yang pernah dipakai tersimpan dan bisa dilihat di formulir
+penghuni; kalau salah isi, tarif itu bisa dihapus dari riwayat.
+
 **Posisi awal.** Ini untuk penghuni yang **sudah menunggak sebelum aplikasi ini
 dipakai**. Isi berapa bulan tertunggak dan berapa rupiah pokoknya. Kamu **tidak
 perlu** mengetik ulang riwayat setahun ke belakang — cukup satu baris ini saja.
@@ -218,6 +228,10 @@ Denda tetap terutang walaupun pokok sewanya kemudian dilunasi.
 Kalau tarif dendanya kamu ubah di Pengaturan, tarif baru **hanya berlaku untuk
 denda yang timbul sesudahnya**. Denda lama tidak ikut berubah.
 
+**Sewa juga begitu.** Setiap bulan dihitung memakai tarif sewa yang berlaku
+**pada saat bulan itu jatuh tempo**, bukan tarif hari ini. Jadi menaikkan sewa
+tidak pernah mengubah tagihan bulan-bulan yang sudah lewat.
+
 **Urutan pembayaran.** Uang yang masuk selalu dipakai berurutan:
 
 1. **Pokok sewa dulu**, dari bulan yang paling lama, sampai uangnya habis.
@@ -247,6 +261,7 @@ bulan **berikutnya** juga lewat. Sebelum itu statusnya masih 🟡 Telat.
 | Penghuni bilang kartunya salah | Kartu adalah foto per tanggal pembuatan. Tekan 🔗 Buat Kartu lagi dan kirim tautan yang baru. |
 | Penghuni buka tautan, muncul "Tautan tidak valid" | Tautannya terpotong saat disalin atau dikirim. Kirim ulang, jangan diketik manual. |
 | Ada denda yang seharusnya tidak ada | Bebaskan lewat baris kamarnya (lihat Bagian 3). |
+| Sesudah sewa dinaikkan, bulan lama ikut berubah | Bulan berlakunya terlalu mundur. Buka penghuninya, hapus tarif itu dari **Riwayat sewa**, lalu isi ulang dengan bulan berlaku yang benar. |
 | Semua data hilang | Impor berkas ekspor terakhir. Kalau belum pernah ekspor, datanya tidak bisa dikembalikan. |
 | Angka tagihan tidak berubah setelah dicatat | Catatan masih menunggu verifikasi. Setujui dulu lewat 🔔. |
 
