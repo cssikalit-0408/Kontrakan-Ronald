@@ -151,6 +151,10 @@ var RO = (function () {
       }
       p.sewaRiwayat.sort(function (a, b) { return a.sejak < b.sejak ? -1 : 1; });
       p.sewa = p.sewaRiwayat[p.sewaRiwayat.length - 1].nilai;
+      /* Catatan penagihan: kapan terakhir dihubungi dan apa hasilnya.
+         Ini catatan pribadi pemilik — tidak pernah ikut ke Kartu Kamar. */
+      if (typeof p.terakhirDitagih !== 'string') p.terakhirDitagih = '';
+      if (typeof p.catatan !== 'string') p.catatan = '';
     });
     db.saldoAwal = db.saldoAwal || [];
     db.pembayaran = db.pembayaran || [];
@@ -674,6 +678,18 @@ var RO = (function () {
       alasanTolak: ''
     });
 
+    /* Contoh catatan penagihan, supaya gunanya langsung kelihatan */
+    var contohKontak = {
+      p7: { mundur: 12, catatan: 'Sudah dihubungi. Minta dicicil Rp 500.000 per bulan mulai bulan depan.' },
+      p5: { mundur: 3, catatan: 'Bilang gajian tanggal 25, mau langsung transfer.' }
+    };
+    db.penghuni.forEach(function (p) {
+      var k = contohKontak[p.id];
+      if (!k) return;
+      p.terakhirDitagih = fmtTgl(tambahHari(T, -k.mundur));
+      p.catatan = k.catatan;
+    });
+
     return rapikanDb(db, T);
   }
 
@@ -855,6 +871,41 @@ var RO = (function () {
     return 'Tidak ada tunggakan';
   }
 
+  /* Kapan terakhir orang ini dihubungi — fakta yang paling menentukan
+     tindakan hari ini, lebih daripada angka rupiahnya. */
+  function labelDitagih(p) {
+    if (!p.terakhirDitagih) return 'Belum pernah ditagih';
+    var n = RO.selisihHari(kini, RO.parseTgl(p.terakhirDitagih));
+    if (n <= 0) return 'Ditagih hari ini';
+    if (n === 1) return 'Ditagih kemarin';
+    return 'Ditagih ' + n + ' hari lalu';
+  }
+
+  function htmlBarisKontak(h) {
+    var p = h.penghuni;
+    if (h.status === 'lancar' && !p.catatan) return '';
+    return '<div class="baris-kontak">🗓️ ' + esc(labelDitagih(p)) +
+      (p.catatan ? '<br>📝 ' + esc(p.catatan) : '') + '</div>';
+  }
+
+  /* Penyunting catatan penagihan. Dipakai di dua tempat: layar detail
+     dan layar tagih. Keduanya tidak pernah terbuka bersamaan. */
+  function htmlKontak(p) {
+    return '<div class="kartu"><div class="kartu-isi">' +
+      '<div class="riwayat-kepala"><span>Catatan penagihan</span>' +
+      '<span class="riwayat-tag tag-jalan">' + esc(labelDitagih(p)) + '</span></div>' +
+      '<p class="petunjuk">Hanya untuk kamu. Tidak pernah ikut ke Kartu Kamar maupun draft pesan.</p>' +
+      '<label class="isian"><span class="nama-isian">Terakhir ditagih</span>' +
+      '<input type="date" id="kTanggal" value="' + esc(p.terakhirDitagih || '') + '"></label>' +
+      '<label class="isian"><span class="nama-isian">Catatan</span>' +
+      '<textarea id="kCatatan" rows="3" placeholder="mis. janji bayar setelah gajian tanggal 25">' +
+      esc(p.catatan || '') + '</textarea></label>' +
+      '<div class="tbl-baris">' +
+      '<button type="button" class="tbl garis kecil-tbl" data-aksi="kontak-hari-ini">Isi hari ini</button>' +
+      '<button type="button" class="tbl kecil-tbl" data-aksi="simpan-kontak" data-id="' + esc(p.id) + '">Simpan catatan</button>' +
+      '</div></div></div>';
+  }
+
   function gambarBeranda() {
     var semua = RO.hitungSemua(db, kini);
     var menunggu = db.pembayaran.filter(function (b) { return b.status === 'menunggu'; });
@@ -916,6 +967,7 @@ var RO = (function () {
           '<div class="baris-judul"><span class="baris-kamar-no">Kamar ' + esc(p.kamar) + '</span>' +
           '<span class="baris-nama">' + esc(p.nama) + '</span></div>' +
           '<div>' + lencanaStatus(h) + '</div>' +
+          htmlBarisKontak(h) +
           '<div class="baris-rincian">' +
           '<span class="baris-tunggak">' + esc(ringkasanBaris(h)) + '</span>' +
           '<span class="baris-total' + (h.totalTagihan === 0 ? ' nol' : '') + '">' + RO.rupiah(h.totalTagihan) + '</span>' +
@@ -960,7 +1012,12 @@ var RO = (function () {
       '<button type="button" data-aksi="kartu" data-id="' + esc(p.id) + '">🔗 Buat Kartu</button>' +
       '</div></div>';
 
-    isi += '<h2 class="judul-bagian">Riwayat</h2>';
+    return isi;
+  }
+
+  function riwayatHtml(h) {
+    var p = h.penghuni;
+    var isi = '<h2 class="judul-bagian">Riwayat</h2>';
 
     /* F8 — satu baris posisi awal di puncak, tanpa mengisi mundur 12 bulan */
     if (h.saldoAwal && h.saldoAwal.pokokTertunggak > 0) {
@@ -976,11 +1033,6 @@ var RO = (function () {
         '</div>';
     }
 
-    return isi;
-  }
-
-  function riwayatHtml(h) {
-    var p = h.penghuni;
     var out = '';
     h.periode.slice(-12).forEach(function (q) {
       var kelas, tag, tagKelas;
@@ -1013,7 +1065,7 @@ var RO = (function () {
       }
       out += '</div>';
     });
-    return out;
+    return isi + out;
   }
 
   function bukaDetail(id) {
@@ -1023,7 +1075,7 @@ var RO = (function () {
     var bayarPenghuni = db.pembayaran.filter(function (b) { return b.penghuniId === id; })
       .slice().sort(function (a, b) { return a.tanggalBayar < b.tanggalBayar ? 1 : -1; });
 
-    var isi = htmlDetail(h) + riwayatHtml(h);
+    var isi = htmlDetail(h) + htmlKontak(p) + riwayatHtml(h);
 
     isi += '<h2 class="judul-bagian">Catatan pembayaran</h2>';
     if (!bayarPenghuni.length) {
@@ -1095,7 +1147,8 @@ var RO = (function () {
       '<button type="button" class="tbl" data-aksi="salin-pesan">📋 Salin pesan</button>' +
       (RO.nomorWA(p.noWA)
         ? '<a class="tbl hijau" id="tautanWA" href="#" data-aksi="buka-wa" data-id="' + esc(p.id) + '">💬 Buka WhatsApp</a>'
-        : '<p class="petunjuk">Nomor WhatsApp penghuni ini belum diisi. Lengkapi lewat Pengaturan supaya tombol WhatsApp bisa dipakai.</p>');
+        : '<p class="petunjuk">Nomor WhatsApp penghuni ini belum diisi. Lengkapi lewat Pengaturan supaya tombol WhatsApp bisa dipakai.</p>') +
+      htmlKontak(p);
     bukaLapis('Tagih — ' + p.nama, isi);
   }
 
@@ -1417,7 +1470,34 @@ var RO = (function () {
       var p = cariPenghuni(t.getAttribute('data-id'));
       var e = el('teksPesan');
       if (!p || !e) return;
+      /* Membuka WhatsApp = benar-benar menagih, jadi langsung dicatat.
+         Kalau tidak begini, catatannya bergantung pada ingatan pemilik. */
+      p.terakhirDitagih = RO.fmtTgl(kini);
+      var c = el('kCatatan');
+      if (c) p.catatan = c.value.trim();
+      RO.simpan(db);
       window.open(RO.tautanWA(p.noWA, e.value), '_blank');
+      bukaTagih(p.id);
+      gambar();
+      toast('Dicatat: ditagih hari ini.');
+    },
+
+    'kontak-hari-ini': function () {
+      var d = el('kTanggal');
+      if (d) d.value = RO.fmtTgl(kini);
+    },
+
+    'simpan-kontak': function (t) {
+      var p = cariPenghuni(t.getAttribute('data-id'));
+      if (!p) return;
+      var d = el('kTanggal');
+      var c = el('kCatatan');
+      var nilai = d ? d.value : '';
+      p.terakhirDitagih = /^\d{4}-\d{2}-\d{2}$/.test(nilai) ? nilai : '';
+      p.catatan = c ? c.value.trim() : '';
+      RO.simpan(db);
+      gambar();
+      toast('Catatan penagihan disimpan.');
     },
 
     'edit-penghuni': function (t) { bukaEditPenghuni(t.getAttribute('data-id')); },

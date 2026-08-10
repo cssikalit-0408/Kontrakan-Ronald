@@ -184,6 +184,27 @@ bicara, bukan makin galak. Tautan kartunya ikut disertakan otomatis.
 Draftnya **boleh kamu ubah dulu** sebelum dikirim. Lalu tekan
 **💬 Buka WhatsApp** — WhatsApp terbuka dengan pesan sudah terisi, tinggal tekan kirim.
 
+### Catatan penagihan
+
+Untuk yang menunggak lama, angka rupiahnya bukan informasi baru — kamu sudah
+tahu. Yang menentukan tindakan hari ini justru: *kapan terakhir saya
+menghubunginya, dan dia bilang apa?*
+
+Setiap penghuni punya **satu tanggal terakhir ditagih** dan **satu kolom catatan
+bebas**. Keduanya bisa diisi dari layar detail kamar atau dari layar Tagih.
+
+Tanggalnya terisi **otomatis** begitu kamu menekan 💬 Buka WhatsApp — jadi kamu
+tidak perlu ingat mencatatnya. Catatannya kamu tulis sendiri, misalnya
+*"janji transfer setelah gajian tanggal 25"* atau *"minta dicicil Rp 500.000
+per bulan"*.
+
+Keduanya lalu muncul langsung di baris kamarnya, jadi sebelum menagih lagi kamu
+bisa lihat dulu apakah orang ini baru dihubungi kemarin atau sudah didiamkan
+tiga minggu.
+
+> **Catatan ini pribadi milik kamu.** Tidak pernah ikut ke Kartu Kamar dan tidak
+> pernah masuk ke draft pesan WhatsApp. Penghuni tidak bisa melihatnya.
+
 ### Membebaskan denda
 
 Kadang dendanya perlu dihapus, misalnya karena penghuni sedang kesulitan.

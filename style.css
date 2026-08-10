@@ -213,6 +213,17 @@ hr.pemisah { border: 0; border-top: 1px solid var(--garis); margin: 14px 0; }
 .l-baru   { background: var(--oranye-latar); color: var(--oranye); }
 .l-lama   { background: var(--merah-latar); color: var(--merah); }
 
+.baris-kontak {
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: var(--latar);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--tinta-lembut);
+  overflow-wrap: anywhere;
+}
+
 .baris-rincian {
   display: flex;
   justify-content: space-between;
